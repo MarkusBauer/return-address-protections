@@ -82,7 +82,7 @@ def main():
             progress(input_files, passes, output_file)
         ts = time.time() - ts
     except:
-            if LOGFILE:
+        if LOGFILE:
             with open(LOGFILE, 'a') as f:
                 f.write(repr(sys.argv) + "\n")
                 traceback.print_exc(file=f)
