@@ -1,0 +1,3 @@
+*.o
+/libunwind-build
+/libunwind-ripxoring.a
