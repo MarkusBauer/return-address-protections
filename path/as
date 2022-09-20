@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+import os
+import shutil
+import sys
+import time
+import traceback
+from typing import List, Set
+
+LOGFILE = None
+STATSFILE = None
+#LOGFILE = '/tmp/py-as.log'
+#STATSFILE = '/tmp/py-as-stats.csv'
+TOOLS_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(TOOLS_PATH)
+import assembly_rewriting
+
+
+def progress(input_files: List[str], passes: Set[str], output_file: str):
+    for f in input_files:
+        asm = assembly_rewriting.AssemblyFile(f)
+        if 'mem-safety-check' in passes or 'shadowstack-mem-safety-check' in passes or 'ripxoring-mem-safety-check' in passes:
+            asm.rewriters.append(assembly_rewriting.MemorySafeFunctionFilter(asm))
+        for p in passes:
+            if p == 'shadowstack' or p == 'shadowstack-mem-safety-check':
+                asm.rewriters.append(assembly_rewriting.ShadowStackRewriter(asm))
+            elif p == 'ripxoring' or p == 'ripxoring-mem-safety-check':
+                asm.rewriters.append(assembly_rewriting.RipXoringRewriter(asm))
+            elif p == 'mem-safety-check':
+                pass
+            elif p == 'canary-count':
+                asm.rewriters.append(assembly_rewriting.CanaryCountRewriter(asm))
+            else:
+                raise Exception(f'Invalid pass: {p}')
+        asm.rewrite()
+        asm.save()
+        # write statistics
+        line = [str(time.time()), '+'.join(sorted(passes)), f, output_file, os.getcwd()]
+        for rewriter in asm.rewriters:
+            line += [str(i) for i in rewriter.get_statistics()]
+        if STATSFILE:
+            with open(STATSFILE, 'a') as sf:
+                sf.write(','.join(line) + "\n")
+
+
+def main():
+    try:
+        # progress assembly
+        new_argv = []
+        passes = set()
+        input_files = []
+
+        for arg in sys.argv:
+            if arg in ('-shadowstack', '-ripxoring', '-mem-safety-check', '-shadowstack-mem-safety-check', '-ripxoring-mem-safety-check', '-canary-count'):
+                passes.add(arg[1:])
+            elif arg.endswith('.s'):
+                input_files.append(arg)
+                new_argv.append(arg)
+            else:
+                new_argv.append(arg)
+        if 'LD_ASSEMBLER_FLAGS' in os.environ:
+            for arg in os.environ['LD_ASSEMBLER_FLAGS'].split(' '):
+                if arg in ('-shadowstack', '-ripxoring', '-mem-safety-check', '-shadowstack-mem-safety-check', '-ripxoring-mem-safety-check', '-canary-count'):
+                    passes.add(arg[1:])
+
+        output_file = '?'
+        output_index = new_argv.index('-o')
+        if 0 < output_index < len(new_argv) - 1:
+            output_file = new_argv[output_index + 1]
+
+        # copy input file for later experiments
+        try:
+            if 'ASM_DUMP_TO' in os.environ:
+                shutil.copy(input_files[0], TOOLS_PATH + '/' + os.environ['ASM_DUMP_TO'])
+            else:
+                shutil.copy(input_files[0], TOOLS_PATH + '/test_input.s')
+        except shutil.SameFileError:
+            pass
+
+        # instrument if necessary
+        ts = time.time()
+        if len(passes) > 0:
+            progress(input_files, passes, output_file)
+        ts = time.time() - ts
+    except:
+            if LOGFILE:
+            with open(LOGFILE, 'a') as f:
+                f.write(repr(sys.argv) + "\n")
+                traceback.print_exc(file=f)
+        raise
+
+    # log invocation + runtime
+    if LOGFILE:
+        with open(LOGFILE, 'a') as f:
+            f.write(repr(new_argv) + ' ' + repr(passes) + ' time=' + repr(ts) + '\n\n')
+
+    # invoke real assembler
+    new_argv[0] = '/usr/bin/as'
+    os.execv(new_argv[0], new_argv)
+
+
+if __name__ == '__main__':
+    main()
