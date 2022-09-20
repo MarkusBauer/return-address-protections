@@ -1,3 +1,6 @@
 *.o
 /libunwind-build
 /libunwind-ripxoring.a
+/libcxx
+/llvm
+/*.tar.xz
